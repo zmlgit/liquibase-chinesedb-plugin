@@ -1,0 +1,4 @@
+liquibase.change.core.AlterProcedureChange
+liquibase.change.core.CreateTriggerChange
+liquibase.change.core.DropTriggerChange
+

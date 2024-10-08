@@ -1,0 +1,5 @@
+liquibase.diff.output.changelog.core.ChangedProcedureChangeGenerator
+liquibase.diff.output.changelog.core.MissingProcedureChangeGenerator
+liquibase.diff.output.changelog.core.MissingTriggerChangeGenerator
+liquibase.diff.output.changelog.core.UnexpectedProcedureChangeGenerator
+liquibase.diff.output.changelog.core.UnexpectedTriggerChangeGenerator

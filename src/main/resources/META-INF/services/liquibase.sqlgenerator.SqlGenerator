@@ -1,0 +1,7 @@
+liquibase.sqlgenerator.core.AddDefaultValueGeneratorDM
+liquibase.sqlgenerator.core.AlterProcedureGenerator
+liquibase.sqlgenerator.core.CreateTriggerGenerator
+liquibase.sqlgenerator.core.DropTriggerGenerator
+liquibase.sqlgenerator.core.GetViewDefinitionGeneratorDM
+liquibase.sqlgenerator.core.InsertOrUpdateGeneratorDM
+
