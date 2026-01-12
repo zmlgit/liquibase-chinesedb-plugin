@@ -24,13 +24,11 @@ import java.util.Set;
 
 public class DMDatabase extends AbstractJdbcDatabase {
 
+
     private static final String PRODUCT_NAME = "DM DBMS";
     private static final String COMPATIBLE_MODE_ORACLE = "oracle";
     private static final Integer PORT = 5236;
     private final Set<String> reservedWords = new HashSet<>(); // 关键字集合
-
-//    private Set<String> userDefinedTypes;
-
 
     /**
      * Default constructor for an object that represents the Oracle Database DBMS.
@@ -83,15 +81,6 @@ public class DMDatabase extends AbstractJdbcDatabase {
                     Scope.getCurrentScope().getLog(getClass()).warning("Could get sql keywords on DM Database: " + e.getMessage());
                     //can not get keywords. Continue on
                 }
-//                try {
-//                    Method method = sqlConn.getClass().getMethod("setRemarksReporting", Boolean.TYPE);
-//                    method.setAccessible(true);
-//                    method.invoke(sqlConn, true);
-//                } catch (Exception e) {
-//                    //noinspection HardCodedStringLiteral
-//                    Scope.getCurrentScope().getLog(getClass()).warning("Could not set remarks reporting on DM Database: " + e.getMessage());
-//                    //cannot set it. That is OK
-//                }
             }
         }
         super.setConnection(conn);
@@ -104,7 +93,22 @@ public class DMDatabase extends AbstractJdbcDatabase {
 
     @Override
     public String getJdbcSchemaName(CatalogAndSchema schema) {
-        return correctObjectName((schema.getCatalogName() == null) ? schema.getSchemaName() : schema.getCatalogName(), Schema.class);
+        String targetSchema = (schema.getSchemaName() == null) ? schema.getCatalogName() : schema.getSchemaName();
+        // Workaround: If we pass the schema name including underscores (e.g. XXL_JOB) to JDBC getTables,
+        // Liquibase core escapes it (XXL\_JOB), effectively making it "XXL\_JOB".
+        // Dameng treats \ as literal, so it fails to find tables.
+        // By returning null for the default schema, we make Liquibase query with schemaPattern=null,
+        // which bypasses escaping and finds tables in the current/default schema.
+        String defaultSchema = getConnectionSchemaName();
+        if (targetSchema != null && defaultSchema != null && targetSchema.equalsIgnoreCase(defaultSchema)) {
+            return null;
+        }
+        return correctObjectName(targetSchema, Schema.class); 
+    }
+
+    @Override
+    public boolean supportsCatalogInObjectName(Class<? extends liquibase.structure.DatabaseObject> type) {
+        return false;
     }
 
     @Override
@@ -177,7 +181,7 @@ public class DMDatabase extends AbstractJdbcDatabase {
 
     @Override
     public boolean jdbcCallsCatalogsSchemas() {
-        return true;
+        return false;
     }
 
     @Override
@@ -198,13 +202,18 @@ public class DMDatabase extends AbstractJdbcDatabase {
 
     @Override
     public boolean supportsSchemas() {
-        return false;
+        return true;
     }
 
     @Override
     protected String getConnectionCatalogName() throws DatabaseException {
+        return null;
+    }
+
+    @Override
+    protected String getConnectionSchemaName() {
         if (getConnection() instanceof OfflineConnection) {
-            return getConnection().getCatalog();
+            return ((OfflineConnection) getConnection()).getSchema();
         }
         try {
             //noinspection HardCodedStringLiteral
@@ -215,6 +224,8 @@ public class DMDatabase extends AbstractJdbcDatabase {
         }
         return null;
     }
+
+
 
     @Override
     public boolean isReservedWord(String objectName) {
@@ -261,31 +272,68 @@ public class DMDatabase extends AbstractJdbcDatabase {
         return false;
     }
 
+    @Override
+    public boolean supportsCatalogs() {
+        return false;
+    }
+
     // 高于oracle
     @Override
     public int getPriority() {
         return PRIORITY_DEFAULT + 1;
     }
 
-//    public Set<String> getUserDefinedTypes() {
-//        if (userDefinedTypes == null) {
-//            userDefinedTypes = new HashSet<>();
-//            if ((getConnection() != null) && !(getConnection() instanceof OfflineConnection)) {
-//                try {
-//                    try {
-//
-//                        //noinspection HardCodedStringLiteral
-//                        userDefinedTypes.addAll(Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", this).queryForList(new RawSqlStatement("SELECT DISTINCT TYPE_NAME FROM ALL_TYPES"), String.class));
-//                    } catch (DatabaseException e) { //fall back to USER_TYPES if the user cannot see ALL_TYPES
-//                        //noinspection HardCodedStringLiteral
-//                        userDefinedTypes.addAll(Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", this).queryForList(new RawSqlStatement("SELECT TYPE_NAME FROM USER_TYPES"), String.class));
-//                    }
-//                } catch (DatabaseException e) {
-//                    //ignore error
-//                }
-//            }
-//        }
-//        return userDefinedTypes;
-//    }
+    @Override
+    public int getDatabaseMajorVersion() throws DatabaseException {
+        try {
+            return getConnection().getDatabaseMajorVersion();
+        } catch (Exception e) {
+            // Fallback for drivers that return invalid version strings
+            return 8; // Default to DM8 likely
+        }
+    }
 
+    @Override
+    public int getDatabaseMinorVersion() throws DatabaseException {
+        try {
+            return getConnection().getDatabaseMinorVersion();
+        } catch (Exception e) {
+            // Fallback for drivers that return invalid version strings
+            return 0;
+        }
+    }
+
+    @Override
+    public boolean isSystemObject(liquibase.structure.DatabaseObject example) {
+        // Workaround: Liquibase normalizes the default schema to null.
+        // This causes issues when comparing against the target schema (e.g. XXL_JOB) which is explicit.
+        // We explicitly restore the schema if it matches the connection's default schema.
+        if (example instanceof liquibase.structure.core.Table && example.getSchema() == null) {
+            String explicitSchema = getConnectionSchemaName();
+            if (explicitSchema != null) {
+                ((liquibase.structure.core.Table) example).setSchema(new Schema((liquibase.structure.core.Catalog) null, explicitSchema));
+            }
+        }
+
+        if (example instanceof liquibase.structure.core.Table && getDatabaseChangeLogTableName().equalsIgnoreCase(example.getName())) {
+            return false;
+        }
+        // Exclude Recycle Bin tables
+        if (example.getName() != null && example.getName().startsWith("BIN$")) {
+            return true;
+        }
+        // Exclude system schemas
+        if (example.getSchema() != null) {
+            String schemaName = example.getSchema().getName();
+            if ("CTISYS".equalsIgnoreCase(schemaName) || "SYS".equalsIgnoreCase(schemaName)) {
+                return true;
+            }
+        }
+        return super.isSystemObject(example);
+    }
+
+    @Override
+    public CatalogAndSchema.CatalogAndSchemaCase getSchemaAndCatalogCase() {
+        return CatalogAndSchema.CatalogAndSchemaCase.UPPER_CASE;
+    }
 }

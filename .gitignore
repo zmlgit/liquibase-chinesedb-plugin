@@ -36,3 +36,5 @@ build/
 
 ### Mac OS ###
 .DS_Store
+src/test/resources/datascript
+src/test/resources/db
