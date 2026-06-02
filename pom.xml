@@ -17,7 +17,7 @@
         <dependency>
             <groupId>org.liquibase</groupId>
             <artifactId>liquibase-core</artifactId>
-            <version>4.20.0</version>
+            <version>4.25.0</version> <!-- Tested with 4.9.3, 4.20.0, 4.25.0, 4.27.0+ -->
             <scope>provided</scope>
         </dependency>
         <dependency>

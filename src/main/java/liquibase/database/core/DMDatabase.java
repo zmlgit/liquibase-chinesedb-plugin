@@ -99,10 +99,10 @@ public class DMDatabase extends AbstractJdbcDatabase {
         // DM treats \ as literal, so XXL_JOB becomes XXL\_JOB and matches nothing.
         // Returning null bypasses the LIKE pattern entirely; Liquibase then filters by schema
         // using equals() comparison at the object level.
-        String defaultSchema = getConnectionSchemaName();
-        if (targetSchema != null && defaultSchema != null && targetSchema.equalsIgnoreCase(defaultSchema)) {
-            return null;
-        }
+        //
+        // Note: We do NOT return null for the defaultSchema==targetSchema case because
+        // Liquibase 4.25.0+ uses getJdbcSchemaName for DATABASECHANGELOG table lookups,
+        // and returning null there causes the table lookup to fail.
         if (targetSchema != null && targetSchema.contains("_")) {
             return null;
         }
