@@ -47,9 +47,25 @@ class DMDatabaseTest {
     void testGetJdbcSchemaName() {
         liquibase.CatalogAndSchema catalogAndSchema = new liquibase.CatalogAndSchema("CATALOG", "SCHEMA");
         org.junit.jupiter.api.Assertions.assertEquals("SCHEMA", dmDatabase.getJdbcSchemaName(catalogAndSchema));
-        
+
         liquibase.CatalogAndSchema catalogOnly = new liquibase.CatalogAndSchema("CATALOG", null);
         org.junit.jupiter.api.Assertions.assertEquals("CATALOG", dmDatabase.getJdbcSchemaName(catalogOnly));
+    }
+
+    @org.junit.jupiter.api.Test
+    void testGetJdbcSchemaNameUnderscoreBypassesEscaping() {
+        // Schema with underscore should return null to bypass Liquibase's LIKE escaping
+        liquibase.CatalogAndSchema underscoreSchema = new liquibase.CatalogAndSchema(null, "XXL_JOB");
+        org.junit.jupiter.api.Assertions.assertNull(dmDatabase.getJdbcSchemaName(underscoreSchema),
+                "Schema with underscore should return null to bypass JDBC LIKE escaping");
+
+        // Schema without underscore should return the schema name normally
+        liquibase.CatalogAndSchema normalSchema = new liquibase.CatalogAndSchema(null, "MYSCHEMA");
+        org.junit.jupiter.api.Assertions.assertEquals("MYSCHEMA", dmDatabase.getJdbcSchemaName(normalSchema));
+
+        // Multiple underscores
+        liquibase.CatalogAndSchema multiUnderscore = new liquibase.CatalogAndSchema(null, "MY_APP_SCHEMA");
+        org.junit.jupiter.api.Assertions.assertNull(dmDatabase.getJdbcSchemaName(multiUnderscore));
     }
 
     @org.junit.jupiter.api.Test

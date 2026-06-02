@@ -29,6 +29,7 @@ public class DMDatabase extends AbstractJdbcDatabase {
     private static final String COMPATIBLE_MODE_ORACLE = "oracle";
     private static final Integer PORT = 5236;
     private final Set<String> reservedWords = new HashSet<>(); // 关键字集合
+    private volatile String cachedSchemaName;
 
     /**
      * Default constructor for an object that represents the Oracle Database DBMS.
@@ -94,16 +95,18 @@ public class DMDatabase extends AbstractJdbcDatabase {
     @Override
     public String getJdbcSchemaName(CatalogAndSchema schema) {
         String targetSchema = (schema.getSchemaName() == null) ? schema.getCatalogName() : schema.getSchemaName();
-        // Workaround: If we pass the schema name including underscores (e.g. XXL_JOB) to JDBC getTables,
-        // Liquibase core escapes it (XXL\_JOB), effectively making it "XXL\_JOB".
-        // Dameng treats \ as literal, so it fails to find tables.
-        // By returning null for the default schema, we make Liquibase query with schemaPattern=null,
-        // which bypasses escaping and finds tables in the current/default schema.
+        // Workaround: Liquibase core escapes _ to \_ when passing schema names as JDBC LIKE patterns.
+        // DM treats \ as literal, so XXL_JOB becomes XXL\_JOB and matches nothing.
+        // Returning null bypasses the LIKE pattern entirely; Liquibase then filters by schema
+        // using equals() comparison at the object level.
         String defaultSchema = getConnectionSchemaName();
         if (targetSchema != null && defaultSchema != null && targetSchema.equalsIgnoreCase(defaultSchema)) {
             return null;
         }
-        return correctObjectName(targetSchema, Schema.class); 
+        if (targetSchema != null && targetSchema.contains("_")) {
+            return null;
+        }
+        return correctObjectName(targetSchema, Schema.class);
     }
 
     @Override
@@ -212,12 +215,19 @@ public class DMDatabase extends AbstractJdbcDatabase {
 
     @Override
     protected String getConnectionSchemaName() {
+        if (cachedSchemaName != null) {
+            return cachedSchemaName;
+        }
         if (getConnection() instanceof OfflineConnection) {
             return ((OfflineConnection) getConnection()).getSchema();
         }
         try {
             //noinspection HardCodedStringLiteral
-            return Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", this).queryForObject(new RawCallStatement("select sys_context( 'userenv', 'current_schema' ) from dual"), String.class);
+            String schema = Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", this).queryForObject(new RawCallStatement("select sys_context( 'userenv', 'current_schema' ) from dual"), String.class);
+            if (schema != null) {
+                cachedSchemaName = schema;
+            }
+            return schema;
         } catch (Exception e) {
             //noinspection HardCodedStringLiteral
             Scope.getCurrentScope().getLog(getClass()).warning("Error getting default schema", e);
