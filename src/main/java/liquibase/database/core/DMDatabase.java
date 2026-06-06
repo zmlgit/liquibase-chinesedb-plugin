@@ -95,17 +95,14 @@ public class DMDatabase extends AbstractJdbcDatabase {
     @Override
     public String getJdbcSchemaName(CatalogAndSchema schema) {
         String targetSchema = (schema.getSchemaName() == null) ? schema.getCatalogName() : schema.getSchemaName();
-        // Workaround: Liquibase core escapes _ to \_ when passing schema names as JDBC LIKE patterns.
-        // DM treats \ as literal, so XXL_JOB becomes XXL\_JOB and matches nothing.
-        // Returning null bypasses the LIKE pattern entirely; Liquibase then filters by schema
-        // using equals() comparison at the object level.
+        // DM supports standard JDBC LIKE escape syntax (\_ matches literal underscore)
+        // in DatabaseMetaData.getTables() and similar calls. Returning the correct schema
+        // name ensures that DATABASECHANGELOG table lookups in Liquibase 4.25.0+ find the
+        // table in the correct schema rather than scanning all schemas.
         //
-        // Note: We do NOT return null for the defaultSchema==targetSchema case because
-        // Liquibase 4.25.0+ uses getJdbcSchemaName for DATABASECHANGELOG table lookups,
-        // and returning null there causes the table lookup to fail.
-        if (targetSchema != null && targetSchema.contains("_")) {
-            return null;
-        }
+        // Previously we returned null for schemas containing _ to work around a perceived
+        // LIKE escaping issue, but that caused Liquibase to search ALL schemas, finding
+        // DATABASECHANGELOG in the wrong schema and skipping table creation.
         return correctObjectName(targetSchema, Schema.class);
     }
 
@@ -287,6 +284,19 @@ public class DMDatabase extends AbstractJdbcDatabase {
         return false;
     }
 
+    /**
+     * DM's DDL implicitly commits the current transaction, making DDL
+     * invisible to other connections until the DML in the same changeset commits.
+     * Returning false forces Liquibase to use autoCommit=true, ensuring each
+     * SQL statement (DDL and DML alike) is immediately visible to all connections.
+     * This prevents the race condition where Module A's CREATE TABLE is visible
+     * to Module B, but Module A's INSERT INTO DATABASECHANGELOG is not.
+     */
+    @Override
+    public boolean supportsDDLInTransaction() {
+        return false;
+    }
+
     // 高于oracle
     @Override
     public int getPriority() {
@@ -345,5 +355,34 @@ public class DMDatabase extends AbstractJdbcDatabase {
     @Override
     public CatalogAndSchema.CatalogAndSchemaCase getSchemaAndCatalogCase() {
         return CatalogAndSchema.CatalogAndSchemaCase.UPPER_CASE;
+    }
+
+    private static final java.util.regex.Pattern CREATE_TABLE_PATTERN =
+            java.util.regex.Pattern.compile("(?i)(CREATE\\s+TABLE\\s+)(?!\\s*IF\\s+NOT\\s+EXISTS)");
+
+    /**
+     * Intercept all SQL execution and add IF NOT EXISTS to CREATE TABLE statements.
+     * This makes all DDL idempotent, preventing race conditions when multiple modules
+     * start concurrently against the same DM schema with independent changelog tables.
+     */
+    @Override
+    public void execute(liquibase.statement.SqlStatement[] statements, java.util.List<liquibase.sql.visitor.SqlVisitor> sqlVisitors) throws liquibase.exception.LiquibaseException {
+        if (statements != null) {
+            for (int i = 0; i < statements.length; i++) {
+                liquibase.statement.SqlStatement stmt = statements[i];
+                if (stmt instanceof liquibase.statement.core.RawSqlStatement) {
+                    String sql = ((liquibase.statement.core.RawSqlStatement) stmt).getSql();
+                    if (sql != null && CREATE_TABLE_PATTERN.matcher(sql).find()) {
+                        String rewritten = CREATE_TABLE_PATTERN.matcher(sql).replaceAll("$1IF NOT EXISTS ");
+                        try {
+                            statements[i] = new liquibase.statement.core.RawSqlStatement(rewritten);
+                        } catch (Exception e) {
+                            throw new liquibase.exception.DatabaseException(e);
+                        }
+                    }
+                }
+            }
+        }
+        super.execute(statements, sqlVisitors);
     }
 }

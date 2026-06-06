@@ -27,7 +27,7 @@ public class DMLockServiceTest {
         // Requires running DB. Maybe reuse testRealUrl setup?
         String url = "jdbc:dm://localhost:5236?SCHEMA=LIQUIBASE_TEST";
         String username = "SYSDBA";
-        String password = "SYSdba_001";
+        String password = "SYSDBA001";
 
         try (Connection connection = DriverManager.getConnection(url, username, password)) {
             Database database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(new JdbcConnection(connection));

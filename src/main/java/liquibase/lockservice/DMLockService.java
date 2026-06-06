@@ -40,6 +40,15 @@ public class DMLockService extends StandardLockService {
             return true;
         }
 
+        // Ensure lock table exists before attempting to acquire lock.
+        // Parent StandardLockService.acquireLock() calls init() first,
+        // but since we override acquireLock(), we must call init() ourselves.
+        try {
+            init();
+        } catch (Exception e) {
+            throw new LockException(e);
+        }
+
         // Use the public isDatabaseChangeLogLockTableInitialized(boolean) method
         // which exists in ALL versions: 4.9.3 (public), 4.20.0 (protected), 4.25.0 (public).
         if (!isDatabaseChangeLogLockTableInitialized(false)) {
